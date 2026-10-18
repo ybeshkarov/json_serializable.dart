@@ -2,42 +2,28 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// ignore_for_file: implementation_imports
+
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:build/build.dart';
 import 'package:code_builder/code_builder.dart'
     hide Enum, FunctionType, RecordType;
-// ignore: implementation_imports
 import 'package:json_serializable/src/constants.dart' show closureArg;
-// ignore: implementation_imports
 import 'package:json_serializable/src/decode_helper.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/default_container.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/enum_utils.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/field_helpers.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/helper_core.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/json_key_utils.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/lambda_result.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/shared_checkers.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/type_helper.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/type_helper_ctx.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/type_helpers/config_types.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/type_helpers/json_converter_helper.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/type_helpers/to_from_string.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/unsupported_type_error.dart';
-// ignore: implementation_imports
 import 'package:json_serializable/src/utils.dart';
 import 'package:path/path.dart' as p;
 import 'package:source_gen/source_gen.dart';
