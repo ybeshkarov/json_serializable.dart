@@ -40,7 +40,7 @@ mixin DecodeHelper implements HelperCore {
       ctorParam: ctorParam,
     );
 
-    final data = _writeConstructorInvocation(
+    final data = writeConstructorInvocation(
       element,
       config.constructor,
       accessibleFields.keys,
@@ -360,7 +360,7 @@ mixin DecodeHelper implements HelperCore {
 ///
 /// [writableFields] are also populated, but only if they have not already
 /// been defined by a constructor parameter with the same name.
-_ConstructorData _writeConstructorInvocation(
+ConstructorData writeConstructorInvocation(
   ClassElement classElement,
   String constructorName,
   Iterable<String> availableConstructorParameters,
@@ -431,21 +431,17 @@ _ConstructorData _writeConstructorInvocation(
 
   usedCtorParamsAndFields.addAll(remainingFieldsForInvocationBody);
 
-  return _ConstructorData(
+  return ConstructorData(
     constructorInvocation,
     remainingFieldsForInvocationBody,
     usedCtorParamsAndFields,
   );
 }
 
-class _ConstructorData {
+class ConstructorData {
   final Expression content;
   final Set<String> fieldsToSet;
   final Set<String> usedCtorParamsAndFields;
 
-  _ConstructorData(
-    this.content,
-    this.fieldsToSet,
-    this.usedCtorParamsAndFields,
-  );
+  ConstructorData(this.content, this.fieldsToSet, this.usedCtorParamsAndFields);
 }
