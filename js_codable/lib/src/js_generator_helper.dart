@@ -2,28 +2,42 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-// ignore_for_file: implementation_imports
-
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:build/build.dart';
 import 'package:code_builder/code_builder.dart'
     hide Enum, FunctionType, RecordType;
+// ignore: implementation_imports
 import 'package:json_serializable/src/constants.dart' show closureArg;
+// ignore: implementation_imports
 import 'package:json_serializable/src/decode_helper.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/default_container.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/enum_utils.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/field_helpers.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/helper_core.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/json_key_utils.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/lambda_result.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/shared_checkers.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/type_helper.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/type_helper_ctx.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/type_helpers/config_types.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/type_helpers/json_converter_helper.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/type_helpers/to_from_string.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/unsupported_type_error.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/utils.dart';
 import 'package:path/path.dart' as p;
 import 'package:source_gen/source_gen.dart';
@@ -169,95 +183,16 @@ class JsGeneratorHelper extends HelperCore {
         )
         .toList();
 
-    void checkForDuplicateKeys(Iterable<FieldElement> fields) {
-      final set = <String>{};
-      for (final fe in fields) {
-        final jsonKey = nameAccess(fe);
-        if (!set.add(jsonKey)) {
-          throw InvalidGenerationSourceError(
-            'More than one field has the JSON key for name "$jsonKey".',
-            element: fe,
-          );
-        }
-      }
-    }
-
     var fieldsToUse = accessibleFields.values.toList();
     Method? fromJsMethod;
 
     if (config.createFactory) {
-      final ctor = constructorByName(element, config.constructor);
-      if (ctor.isPrivate) {
-        throw InvalidGenerationSourceError(
-          'Constructor `${element.name}.${config.constructor}` is private and '
-          'cannot be invoked from the standalone `.js_codable.dart` library.',
-          element: ctor,
-        );
-      }
-
-      Expression deserializeFun(
-        String paramOrFieldName, {
-        FormalParameterElement? ctorParam,
-      }) => _deserializeForField(
-        accessibleFields[paramOrFieldName]!,
-        ctorParam: ctorParam,
-      );
-
-      final writableFields = accessibleFields.values
-          .where((fe) {
-            final setter = element.lookUpSetter(
-              name: fe.name!,
-              library: element.library,
-            );
-            return setter != null && setter.isPublic;
-          })
-          .map((fe) => fe.name!)
-          .toList();
-
-      final data = writeConstructorInvocation(
-        element,
-        config.constructor,
-        accessibleFields.keys,
-        writableFields,
+      final factoryData = _buildFromJsFactoryData(
+        accessibleFields,
         unavailableReasons,
-        deserializeFun,
       );
-
-      fieldsToUse = accessibleFields.entries
-          .where((e) => data.usedCtorParamsAndFields.contains(e.key))
-          .map((e) => e.value)
-          .toList();
-
-      checkForDuplicateKeys(fieldsToUse);
-
-      final bodyExpr = data.fieldsToSet.isEmpty
-          ? data.content
-          : data.fieldsToSet.fold<Expression>(
-              data.content,
-              (current, field) => current
-                  .cascade(field)
-                  .assign(
-                    CodeExpression(
-                      Code('${toCodeString(deserializeFun(field))} '),
-                    ),
-                  ),
-            );
-
-      final className = element.name!;
-      fromJsMethod = Method(
-        (m) => m
-          ..name = '\$${className}FromJs'
-          ..returns = refer(targetClassReference)
-          ..requiredParameters.add(
-            Parameter(
-              (p) => p
-                ..name = 'js'
-                ..type = refer('${className}JS'),
-            ),
-          )
-          ..lambda = true
-          ..body = bodyExpr.code,
-      );
+      fieldsToUse = factoryData.fieldsToUse;
+      fromJsMethod = factoryData.fromJsMethod;
     }
 
     final decodeFields = List<FieldElement>.of(fieldsToUse);
@@ -277,13 +212,107 @@ class JsGeneratorHelper extends HelperCore {
         .where((f) => f.isPublic && !jsonKeyFor(f).explicitNoToJson)
         .toList();
 
-    checkForDuplicateKeys(encodeFields);
+    _checkForDuplicateKeys(encodeFields);
 
     return (
       decodeFields: decodeFields,
       encodeFields: encodeFields,
       fromJsMethod: fromJsMethod,
     );
+  }
+
+  ({List<FieldElement> fieldsToUse, Method fromJsMethod})
+  _buildFromJsFactoryData(
+    Map<String, FieldElement> accessibleFields,
+    Map<String, String> unavailableReasons,
+  ) {
+    final ctor = constructorByName(element, config.constructor);
+    if (ctor.isPrivate) {
+      throw InvalidGenerationSourceError(
+        'Constructor `${element.name}.${config.constructor}` is private and '
+        'cannot be invoked from the standalone `.js_codable.dart` library.',
+        element: ctor,
+      );
+    }
+
+    Expression deserializeFun(
+      String paramOrFieldName, {
+      FormalParameterElement? ctorParam,
+    }) => _deserializeForField(
+      accessibleFields[paramOrFieldName]!,
+      ctorParam: ctorParam,
+    );
+
+    final writableFields = accessibleFields.values
+        .where((fe) {
+          final setter = element.lookUpSetter(
+            name: fe.name!,
+            library: element.library,
+          );
+          return setter != null && setter.isPublic;
+        })
+        .map((fe) => fe.name!)
+        .toList();
+
+    final data = writeConstructorInvocation(
+      element,
+      config.constructor,
+      accessibleFields.keys,
+      writableFields,
+      unavailableReasons,
+      deserializeFun,
+    );
+
+    final fieldsToUse = accessibleFields.entries
+        .where((e) => data.usedCtorParamsAndFields.contains(e.key))
+        .map((e) => e.value)
+        .toList();
+
+    _checkForDuplicateKeys(fieldsToUse);
+
+    final bodyExpr = data.fieldsToSet.isEmpty
+        ? data.content
+        : data.fieldsToSet.fold<Expression>(
+            data.content,
+            (current, field) => current
+                .cascade(field)
+                .assign(
+                  CodeExpression(
+                    Code('${toCodeString(deserializeFun(field))} '),
+                  ),
+                ),
+          );
+
+    final className = element.name!;
+    final fromJsMethod = Method(
+      (m) => m
+        ..name = '\$${className}FromJs'
+        ..returns = refer(targetClassReference)
+        ..requiredParameters.add(
+          Parameter(
+            (p) => p
+              ..name = 'js'
+              ..type = refer('${className}JS'),
+          ),
+        )
+        ..lambda = true
+        ..body = bodyExpr.code,
+    );
+
+    return (fieldsToUse: fieldsToUse, fromJsMethod: fromJsMethod);
+  }
+
+  void _checkForDuplicateKeys(Iterable<FieldElement> fields) {
+    final set = <String>{};
+    for (final fe in fields) {
+      final jsonKey = nameAccess(fe);
+      if (!set.add(jsonKey)) {
+        throw InvalidGenerationSourceError(
+          'More than one field has the JSON key for name "$jsonKey".',
+          element: fe,
+        );
+      }
+    }
   }
 
   ExtensionType _buildExtensionType({
@@ -305,34 +334,8 @@ class JsGeneratorHelper extends HelperCore {
     ];
 
     final constructors = <Constructor>[
-      if (config.createToJson)
-        Constructor(
-          (c) => c
-            ..external = true
-            ..factory = true
-            ..optionalParameters.addAll([
-              for (final field in factoryFields)
-                Parameter((p) {
-                  final wireName = nameAccess(field);
-                  final wireType = _encodeExternalWireTypeForField(field);
-                  final isNullable = wireType.endsWith('?');
-                  p
-                    ..name = field.name!
-                    ..named = true
-                    ..required =
-                        !isNullable || _hasExplicitIncludeIfNullTrue(field)
-                    ..type = refer(wireType);
-                  if (wireName != field.name!) {
-                    p.annotations.add(
-                      refer(
-                        'JS',
-                      ).call([CodeExpression(Code(safeNameAccess(field)))]),
-                    );
-                  }
-                }),
-            ]),
-        ),
-      if (config.createToJson)
+      if (config.createToJson) ...[
+        _buildExternalFactoryConstructor(factoryFields),
         Constructor(
           (c) => c
             ..name = 'fromDart'
@@ -347,26 +350,14 @@ class JsGeneratorHelper extends HelperCore {
             ..lambda = true
             ..body = refer('\$${className}ToJs').call([refer('instance')]).code,
         ),
+      ],
     ];
 
-    final methods = <Method>[
-      for (final field in getterFields) ...[
-        _buildJsGetter(field),
-        if (_isMutableField(field) &&
-            !nonIdentifierEncodeFields.contains(field))
-          _buildJsSetter(field),
-      ],
-      if (config.createToJson)
-        for (final field in nonIdentifierEncodeFields) _buildJsSetter(field),
-      if (config.createFactory)
-        Method(
-          (m) => m
-            ..name = 'toDart'
-            ..returns = refer(targetClassReference)
-            ..lambda = true
-            ..body = refer('\$${className}FromJs').call([refer('this')]).code,
-        ),
-    ];
+    final methods = _buildExtensionTypeMethods(
+      className: className,
+      getterFields: getterFields,
+      nonIdentifierEncodeFields: nonIdentifierEncodeFields,
+    );
 
     return ExtensionType((b) {
       if (element.documentationComment case final doc? when doc.isNotEmpty) {
@@ -386,6 +377,54 @@ class JsGeneratorHelper extends HelperCore {
         ..methods.addAll(methods);
     });
   }
+
+  Constructor _buildExternalFactoryConstructor(
+    List<FieldElement> factoryFields,
+  ) => Constructor(
+    (c) => c
+      ..external = true
+      ..factory = true
+      ..optionalParameters.addAll([
+        for (final field in factoryFields)
+          Parameter((p) {
+            final wireName = nameAccess(field);
+            final wireType = _encodeExternalWireTypeForField(field);
+            final isNullable = wireType.endsWith('?');
+            p
+              ..name = field.name!
+              ..named = true
+              ..required = !isNullable || _hasExplicitIncludeIfNullTrue(field)
+              ..type = refer(wireType);
+            if (wireName != field.name!) {
+              p.annotations.add(
+                refer('JS').call([CodeExpression(Code(safeNameAccess(field)))]),
+              );
+            }
+          }),
+      ]),
+  );
+
+  List<Method> _buildExtensionTypeMethods({
+    required String className,
+    required List<FieldElement> getterFields,
+    required List<FieldElement> nonIdentifierEncodeFields,
+  }) => <Method>[
+    for (final field in getterFields) ...[
+      _buildJsGetter(field),
+      if (_isMutableField(field) && !nonIdentifierEncodeFields.contains(field))
+        _buildJsSetter(field),
+    ],
+    if (config.createToJson)
+      for (final field in nonIdentifierEncodeFields) _buildJsSetter(field),
+    if (config.createFactory)
+      Method(
+        (m) => m
+          ..name = 'toDart'
+          ..returns = refer(targetClassReference)
+          ..lambda = true
+          ..body = refer('\$${className}FromJs').call([refer('this')]).code,
+      ),
+  ];
 
   bool _isMutableField(FieldElement field) {
     if (field.isFinal || field.isConst) return false;
@@ -705,21 +744,11 @@ class JsGeneratorHelper extends HelperCore {
       return _converterWireToJsExternalBaseType(converter.jsonType);
     }
 
-    if (nonNull.isDartCoreString) return 'String';
-    if (nonNull.isDartCoreInt) return 'int';
-    if (nonNull.isDartCoreDouble) return 'double';
-    if (nonNull.isDartCoreNum) return 'num';
-    if (nonNull.isDartCoreBool) return 'bool';
-    if (_isJsInteropExtensionType(nonNull)) return typeToCode(nonNull);
+    if (_coreScalarExternalBaseType(nonNull) case final scalarBase?) {
+      return scalarBase;
+    }
 
-    if (coreDateTimeTypeChecker.isExactlyType(nonNull) ||
-        coreUriTypeChecker.isExactlyType(nonNull) ||
-        coreBigIntTypeChecker.isExactlyType(nonNull)) {
-      return 'String';
-    }
-    if (_coreDurationChecker.isExactlyType(nonNull)) {
-      return 'int';
-    }
+    if (_isJsInteropExtensionType(nonNull)) return typeToCode(nonNull);
 
     if (nonNull.isEnum) {
       return _enumExternalBaseType(nonNull);
@@ -739,11 +768,27 @@ class JsGeneratorHelper extends HelperCore {
       return 'JSObject';
     }
 
-    if (nonNull.isDartCoreObject || nonNull is DynamicType) {
+    if (_isDynamicOrObject(nonNull)) {
       return 'JSAny?';
     }
 
     throw UnsupportedTypeError(targetType, fieldElementName(ctx));
+  }
+
+  String? _coreScalarExternalBaseType(DartType nonNull) {
+    if (nonNull.isDartCoreString ||
+        coreDateTimeTypeChecker.isExactlyType(nonNull) ||
+        coreUriTypeChecker.isExactlyType(nonNull) ||
+        coreBigIntTypeChecker.isExactlyType(nonNull)) {
+      return 'String';
+    }
+    if (nonNull.isDartCoreInt || _coreDurationChecker.isExactlyType(nonNull)) {
+      return 'int';
+    }
+    if (nonNull.isDartCoreDouble) return 'double';
+    if (nonNull.isDartCoreNum) return 'num';
+    if (nonNull.isDartCoreBool) return 'bool';
+    return null;
   }
 
   String _jsBoxedType(DartType targetType, TypeHelperCtx ctx) {
@@ -962,27 +1007,31 @@ class JsGeneratorHelper extends HelperCore {
       ]);
     }
     if (coreIterableTypeChecker.isAssignableFromType(nonNullWireType)) {
-      final itemType = coreIterableGenericType(nonNullWireType);
-      final asList = nonNullJsExpr
-          .property('dartify')
-          .call([])
-          .asA(refer('List'));
-      if (_isDynamicOrObject(itemType)) {
-        final isSet = _coreSetChecker.isAssignableFromType(nonNullWireType);
-        return isSet ? asList.property('toSet').call([]) : asList;
-      }
-      final casted = asList.property('cast').call([], {}, [
-        refer(typeToCode(itemType)),
-      ]);
-      final isSet = _coreSetChecker.isAssignableFromType(nonNullWireType);
-      return isSet
-          ? casted.property('toSet').call([])
-          : casted.property('toList').call([]);
+      return _bridgeJsArrayToConverterIterable(nonNullJsExpr, nonNullWireType);
     }
     if (nonNullWireType.isDartCoreObject && !nonNullWireType.isNullableType) {
       return nonNullJsExpr.property('dartify').call([]).nullChecked;
     }
     return nonNullJsExpr.property('dartify').call([]);
+  }
+
+  Expression _bridgeJsArrayToConverterIterable(
+    Expression nonNullJsExpr,
+    DartType nonNullWireType,
+  ) {
+    final itemType = coreIterableGenericType(nonNullWireType);
+    final isSet = _coreSetChecker.isAssignableFromType(nonNullWireType);
+    final asList = nonNullJsExpr
+        .property('dartify')
+        .call([])
+        .asA(refer('List'));
+    if (_isDynamicOrObject(itemType)) {
+      return isSet ? asList.property('toSet').call([]) : asList;
+    }
+    final casted = asList.property('cast').call([], {}, [
+      refer(typeToCode(itemType)),
+    ]);
+    return casted.property(isSet ? 'toSet' : 'toList').call([]);
   }
 
   Expression _deserializeExternalValue({
@@ -1009,7 +1058,7 @@ class JsGeneratorHelper extends HelperCore {
     }
 
     // 2. Object? / dynamic
-    if (nonNull.isDartCoreObject || nonNull is DynamicType) {
+    if (_isDynamicOrObject(nonNull)) {
       final dartified = jsExpr.property('dartify').call([]);
       if (defaultValue != null) {
         return dartified.ifNullThen(
@@ -1034,44 +1083,50 @@ class JsGeneratorHelper extends HelperCore {
 
     // 4. Types that convert a non-null external wire value (DateTime, Uri,
     //    BigInt, Duration, nested @JsonSerializable, Iterable, Map).
-    Expression convertNonNull(Expression nonNullWire) {
-      if (coreDateTimeTypeChecker.isExactlyType(nonNull)) {
-        return dateTimeString
-            .deserialize(nonNull, nonNullWire, false, true)!
-            .output;
-      }
-      if (coreUriTypeChecker.isExactlyType(nonNull)) {
-        return uriString.deserialize(nonNull, nonNullWire, false, true)!.output;
-      }
-      if (coreBigIntTypeChecker.isExactlyType(nonNull)) {
-        return bigIntString
-            .deserialize(nonNull, nonNullWire, false, true)!
-            .output;
-      }
-      if (_coreDurationChecker.isExactlyType(nonNull)) {
-        return refer('Duration').newInstance([], {'microseconds': nonNullWire});
-      }
-      if (_isJsCodableClass(nonNull)) {
-        return LambdaResult(nonNullWire, '\$${nonNull.element!.name!}FromJs');
-      }
-      if (coreIterableTypeChecker.isAssignableFromType(nonNull)) {
-        return _deserializeIterableFromJsArray(nonNull, nonNullWire, ctx);
-      }
-      if (coreMapTypeChecker.isAssignableFromType(nonNull)) {
-        return _deserializeMapFromJsObject(nonNull, nonNullWire, ctx);
-      }
-      throw UnsupportedTypeError(targetType, toCodeString(jsExpr));
-    }
-
     if (isGetterNullable) {
       return _nullSwitchExpression(
         jsExpr,
-        onNonNull: convertNonNull,
+        onNonNull: (v) =>
+            _convertNonNullExternalValue(targetType, nonNull, v, ctx),
         defaultValue: defaultValue,
       );
     }
 
-    return convertNonNull(jsExpr);
+    return _convertNonNullExternalValue(targetType, nonNull, jsExpr, ctx);
+  }
+
+  Expression _convertNonNullExternalValue(
+    DartType targetType,
+    DartType nonNull,
+    Expression nonNullWire,
+    TypeHelperCtx ctx,
+  ) {
+    if (coreDateTimeTypeChecker.isExactlyType(nonNull)) {
+      return dateTimeString
+          .deserialize(nonNull, nonNullWire, false, true)!
+          .output;
+    }
+    if (coreUriTypeChecker.isExactlyType(nonNull)) {
+      return uriString.deserialize(nonNull, nonNullWire, false, true)!.output;
+    }
+    if (coreBigIntTypeChecker.isExactlyType(nonNull)) {
+      return bigIntString
+          .deserialize(nonNull, nonNullWire, false, true)!
+          .output;
+    }
+    if (_coreDurationChecker.isExactlyType(nonNull)) {
+      return refer('Duration').newInstance([], {'microseconds': nonNullWire});
+    }
+    if (_isJsCodableClass(nonNull)) {
+      return LambdaResult(nonNullWire, '\$${nonNull.element!.name!}FromJs');
+    }
+    if (coreIterableTypeChecker.isAssignableFromType(nonNull)) {
+      return _deserializeIterableFromJsArray(nonNull, nonNullWire, ctx);
+    }
+    if (coreMapTypeChecker.isAssignableFromType(nonNull)) {
+      return _deserializeMapFromJsObject(nonNull, nonNullWire, ctx);
+    }
+    throw UnsupportedTypeError(targetType, toCodeString(nonNullWire));
   }
 
   Expression _deserializeEnum({
@@ -1283,25 +1338,10 @@ class JsGeneratorHelper extends HelperCore {
       return convertBoxedNonNull(boxedExpr);
     }
 
-    if (nonNull.isDartCoreString) {
+    if (_boxedPrimitiveGetterName(nonNull) case final getterName?) {
       return isNullable
-          ? boxedExpr.nullSafeProperty('toDart')
-          : boxedExpr.property('toDart');
-    }
-    if (nonNull.isDartCoreInt) {
-      return isNullable
-          ? boxedExpr.nullSafeProperty('toDartInt')
-          : boxedExpr.property('toDartInt');
-    }
-    if (nonNull.isDartCoreDouble || nonNull.isDartCoreNum) {
-      return isNullable
-          ? boxedExpr.nullSafeProperty('toDartDouble')
-          : boxedExpr.property('toDartDouble');
-    }
-    if (nonNull.isDartCoreBool) {
-      return isNullable
-          ? boxedExpr.nullSafeProperty('toDart')
-          : boxedExpr.property('toDart');
+          ? boxedExpr.nullSafeProperty(getterName)
+          : boxedExpr.property(getterName);
     }
     if (_isJsInteropExtensionType(nonNull)) {
       return boxedExpr;
@@ -1313,73 +1353,79 @@ class JsGeneratorHelper extends HelperCore {
           : dartified;
     }
 
-    Expression convertNonNullBoxed(Expression nonNullBoxed) {
-      if (coreDateTimeTypeChecker.isExactlyType(nonNull)) {
-        return refer('DateTime.parse').call([nonNullBoxed.property('toDart')]);
-      }
-      if (coreUriTypeChecker.isExactlyType(nonNull)) {
-        return refer('Uri.parse').call([nonNullBoxed.property('toDart')]);
-      }
-      if (coreBigIntTypeChecker.isExactlyType(nonNull)) {
-        return refer('BigInt.parse').call([nonNullBoxed.property('toDart')]);
-      }
-      if (_coreDurationChecker.isExactlyType(nonNull)) {
-        return refer(
-          'Duration',
-        ).newInstance([], {'microseconds': nonNullBoxed.property('toDartInt')});
-      }
-      if (nonNull.isEnum) {
-        final enumBase = _enumExternalBaseType(nonNull);
-        final unboxed = switch (enumBase) {
-          'String' => nonNullBoxed.property('toDart'),
-          'int' => nonNullBoxed.property('toDartInt'),
-          _ => nonNullBoxed.property('dartify').call([]),
-        };
-        return _deserializeEnum(
-          targetType: nonNull,
-          wireExpr: unboxed,
-          ctx: ctx,
-          defaultValue: null,
-        );
-      }
-      if (_isJsCodableClass(nonNull)) {
-        return LambdaResult(nonNullBoxed, '\$${nonNull.element!.name!}FromJs');
-      }
-      if (coreIterableTypeChecker.isAssignableFromType(nonNull)) {
-        return _deserializeIterableFromJsArray(nonNull, nonNullBoxed, ctx);
-      }
-      if (coreMapTypeChecker.isAssignableFromType(nonNull)) {
-        return _deserializeMapFromJsObject(nonNull, nonNullBoxed, ctx);
-      }
-      throw UnsupportedTypeError(targetType, toCodeString(boxedExpr));
-    }
-
     if (isNullable) {
       return _nullSwitchExpression(
         boxedExpr,
-        onNonNull: convertNonNullBoxed,
+        onNonNull: (v) =>
+            _convertNonNullBoxedValue(targetType, nonNull, v, ctx),
         defaultValue: null,
       );
     }
 
-    return convertNonNullBoxed(boxedExpr);
+    return _convertNonNullBoxedValue(targetType, nonNull, boxedExpr, ctx);
+  }
+
+  String? _boxedPrimitiveGetterName(DartType nonNull) {
+    if (nonNull.isDartCoreString || nonNull.isDartCoreBool) return 'toDart';
+    if (nonNull.isDartCoreInt) return 'toDartInt';
+    if (nonNull.isDartCoreDouble || nonNull.isDartCoreNum) {
+      return 'toDartDouble';
+    }
+    return null;
+  }
+
+  Expression _convertNonNullBoxedValue(
+    DartType targetType,
+    DartType nonNull,
+    Expression nonNullBoxed,
+    TypeHelperCtx ctx,
+  ) {
+    if (coreDateTimeTypeChecker.isExactlyType(nonNull)) {
+      return refer('DateTime.parse').call([nonNullBoxed.property('toDart')]);
+    }
+    if (coreUriTypeChecker.isExactlyType(nonNull)) {
+      return refer('Uri.parse').call([nonNullBoxed.property('toDart')]);
+    }
+    if (coreBigIntTypeChecker.isExactlyType(nonNull)) {
+      return refer('BigInt.parse').call([nonNullBoxed.property('toDart')]);
+    }
+    if (_coreDurationChecker.isExactlyType(nonNull)) {
+      return refer(
+        'Duration',
+      ).newInstance([], {'microseconds': nonNullBoxed.property('toDartInt')});
+    }
+    if (nonNull.isEnum) {
+      final enumBase = _enumExternalBaseType(nonNull);
+      final unboxed = switch (enumBase) {
+        'String' => nonNullBoxed.property('toDart'),
+        'int' => nonNullBoxed.property('toDartInt'),
+        _ => nonNullBoxed.property('dartify').call([]),
+      };
+      return _deserializeEnum(
+        targetType: nonNull,
+        wireExpr: unboxed,
+        ctx: ctx,
+        defaultValue: null,
+      );
+    }
+    if (_isJsCodableClass(nonNull)) {
+      return LambdaResult(nonNullBoxed, '\$${nonNull.element!.name!}FromJs');
+    }
+    if (coreIterableTypeChecker.isAssignableFromType(nonNull)) {
+      return _deserializeIterableFromJsArray(nonNull, nonNullBoxed, ctx);
+    }
+    if (coreMapTypeChecker.isAssignableFromType(nonNull)) {
+      return _deserializeMapFromJsObject(nonNull, nonNullBoxed, ctx);
+    }
+    throw UnsupportedTypeError(targetType, toCodeString(nonNullBoxed));
   }
 
   Expression _unboxJsAnyToConverterWire(
     Expression nonNullBoxed,
     DartType nonNullWireType,
   ) {
-    if (nonNullWireType.isDartCoreString) {
-      return nonNullBoxed.property('toDart');
-    }
-    if (nonNullWireType.isDartCoreInt) {
-      return nonNullBoxed.property('toDartInt');
-    }
-    if (nonNullWireType.isDartCoreDouble || nonNullWireType.isDartCoreNum) {
-      return nonNullBoxed.property('toDartDouble');
-    }
-    if (nonNullWireType.isDartCoreBool) {
-      return nonNullBoxed.property('toDart');
+    if (_boxedPrimitiveGetterName(nonNullWireType) case final getterName?) {
+      return nonNullBoxed.property(getterName);
     }
     return _bridgeJsExternalToConverterWire(nonNullBoxed, nonNullWireType);
   }
@@ -1469,19 +1515,15 @@ class JsGeneratorHelper extends HelperCore {
       }
       return refer(toJsFn).call([wireExpr]);
     }
-    if (coreMapTypeChecker.isAssignableFromType(nonNull)) {
+    if (coreMapTypeChecker.isAssignableFromType(nonNull) ||
+        coreIterableTypeChecker.isAssignableFromType(nonNull)) {
+      final baseJsType = coreMapTypeChecker.isAssignableFromType(nonNull)
+          ? 'JSObject'
+          : 'JSArray<JSAny?>';
       final jsified = isNullable
           ? wireExpr.nullSafeProperty('jsify').call([])
           : wireExpr.property('jsify').call([]);
-      return jsified.asA(refer(isNullable ? 'JSObject?' : 'JSObject'));
-    }
-    if (coreIterableTypeChecker.isAssignableFromType(nonNull)) {
-      final jsified = isNullable
-          ? wireExpr.nullSafeProperty('jsify').call([])
-          : wireExpr.property('jsify').call([]);
-      return jsified.asA(
-        refer(isNullable ? 'JSArray<JSAny?>?' : 'JSArray<JSAny?>'),
-      );
+      return jsified.asA(refer(_withNullability(baseJsType, isNullable)));
     }
     if (!isNullable && nonNull.isDartCoreObject) {
       return wireExpr.property('jsify').call([]).nullChecked;
@@ -1509,6 +1551,35 @@ class JsGeneratorHelper extends HelperCore {
           : jsified;
     }
 
+    if (_serializeCoreValueToPrimitive(
+          targetType,
+          nonNull,
+          dartExpr,
+          isNullable: isNullable,
+        )
+        case final corePrimitive?) {
+      return corePrimitive;
+    }
+
+    if (nonNull.isEnum) {
+      return _serializeEnum(targetType, dartExpr);
+    }
+
+    return _serializeCompositeToJs(
+      targetType,
+      nonNull,
+      dartExpr,
+      ctx,
+      isNullable: isNullable,
+    );
+  }
+
+  Expression? _serializeCoreValueToPrimitive(
+    DartType targetType,
+    DartType nonNull,
+    Expression dartExpr, {
+    required bool isNullable,
+  }) {
     if (coreDateTimeTypeChecker.isExactlyType(nonNull)) {
       final helper = config.dateTimeUtc ? dateTimeUtcString : dateTimeString;
       return helper.serialize(targetType, dartExpr, isNullable)!;
@@ -1524,11 +1595,16 @@ class JsGeneratorHelper extends HelperCore {
           ? dartExpr.nullSafeProperty('inMicroseconds')
           : dartExpr.property('inMicroseconds');
     }
+    return null;
+  }
 
-    if (nonNull.isEnum) {
-      return _serializeEnum(targetType, dartExpr);
-    }
-
+  Expression _serializeCompositeToJs(
+    DartType targetType,
+    DartType nonNull,
+    Expression dartExpr,
+    TypeHelperCtx ctx, {
+    required bool isNullable,
+  }) {
     if (_isJsCodableClass(nonNull)) {
       final toJsFn = '\$${nonNull.element!.name!}ToJs';
       if (isNullable) {
@@ -1699,11 +1775,7 @@ class JsGeneratorHelper extends HelperCore {
       return encodeNonNull(dartExpr);
     }
 
-    if (nonNull.isDartCoreString ||
-        nonNull.isDartCoreInt ||
-        nonNull.isDartCoreDouble ||
-        nonNull.isDartCoreNum ||
-        nonNull.isDartCoreBool) {
+    if (_isPrimitiveJsExternalType(nonNull)) {
       return isNullable
           ? dartExpr.nullSafeProperty('toJS')
           : dartExpr.property('toJS');
@@ -1715,27 +1787,14 @@ class JsGeneratorHelper extends HelperCore {
       return dartExpr.property('jsify').call([]);
     }
 
-    if (coreDateTimeTypeChecker.isExactlyType(nonNull)) {
-      final helper = config.dateTimeUtc ? dateTimeUtcString : dateTimeString;
-      return helper
-          .serialize(targetType, dartExpr, isNullable)!
-          .property('toJS');
-    }
-    if (coreUriTypeChecker.isExactlyType(nonNull)) {
-      return uriString
-          .serialize(targetType, dartExpr, isNullable)!
-          .property('toJS');
-    }
-    if (coreBigIntTypeChecker.isExactlyType(nonNull)) {
-      return bigIntString
-          .serialize(targetType, dartExpr, isNullable)!
-          .property('toJS');
-    }
-    if (_coreDurationChecker.isExactlyType(nonNull)) {
-      final micros = isNullable
-          ? dartExpr.nullSafeProperty('inMicroseconds')
-          : dartExpr.property('inMicroseconds');
-      return micros.property('toJS');
+    if (_serializeCoreValueToPrimitive(
+          targetType,
+          nonNull,
+          dartExpr,
+          isNullable: isNullable,
+        )
+        case final corePrimitive?) {
+      return corePrimitive.property('toJS');
     }
     if (nonNull.isEnum) {
       final enumVal = _serializeEnum(targetType, dartExpr);
@@ -1745,42 +1804,20 @@ class JsGeneratorHelper extends HelperCore {
           ? enumVal.nullSafeProperty('toJS')
           : enumVal.property('toJS');
     }
-    if (_isJsCodableClass(nonNull)) {
-      final toJsFn = '\$${nonNull.element!.name!}ToJs';
-      if (isNullable) {
-        return _nullSwitchExpression(
-          dartExpr,
-          onNonNull: (v) => refer(toJsFn).call([v]),
-          defaultValue: null,
-        );
-      }
-      return LambdaResult(dartExpr, toJsFn);
-    }
-    if (coreIterableTypeChecker.isAssignableFromType(nonNull)) {
-      return _serializeIterableToJsArray(targetType, dartExpr, ctx);
-    }
-    if (coreMapTypeChecker.isAssignableFromType(nonNull)) {
-      if (isNullable) {
-        return _nullSwitchExpression(
-          dartExpr,
-          onNonNull: (v) => _serializeMapToJsObject(nonNull, v, ctx),
-          defaultValue: null,
-        );
-      }
-      return _serializeMapToJsObject(nonNull, dartExpr, ctx);
-    }
 
-    throw UnsupportedTypeError(targetType, toCodeString(dartExpr));
+    return _serializeCompositeToJs(
+      targetType,
+      nonNull,
+      dartExpr,
+      ctx,
+      isNullable: isNullable,
+    );
   }
 
   Expression _boxConverterWireToJsAny(Expression wireExpr, DartType wireType) {
     final nonNull = wireType.promoteNonNullable();
     final isNullable = wireType.isNullableType;
-    if (nonNull.isDartCoreString ||
-        nonNull.isDartCoreInt ||
-        nonNull.isDartCoreDouble ||
-        nonNull.isDartCoreNum ||
-        nonNull.isDartCoreBool) {
+    if (_isPrimitiveJsExternalType(nonNull)) {
       return isNullable
           ? wireExpr.nullSafeProperty('toJS')
           : wireExpr.property('toJS');
@@ -1861,6 +1898,16 @@ class JsGeneratorHelper extends HelperCore {
       _collectTypeImports(converter.fieldType);
     }
 
+    _collectFieldHierarchyImports(field);
+    for (final ann in element.metadata.annotations) {
+      _collectTypeImports(ann.computeConstantValue()?.type);
+    }
+    for (final conv in config.converters) {
+      _collectTypeImports(conv.type);
+    }
+  }
+
+  void _collectFieldHierarchyImports(FieldElement field) {
     for (final f in fieldHierarchyFor(field)) {
       for (final ann in [
         ...f.metadata.annotations,
@@ -1879,12 +1926,6 @@ class JsGeneratorHelper extends HelperCore {
           _recordLibraryImport(toFn.objectValue.toFunctionValue()?.library);
         }
       }
-    }
-    for (final ann in element.metadata.annotations) {
-      _collectTypeImports(ann.computeConstantValue()?.type);
-    }
-    for (final conv in config.converters) {
-      _collectTypeImports(conv.type);
     }
   }
 

@@ -2,12 +2,11 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-// ignore_for_file: implementation_imports
-
 import 'package:analyzer/dart/element/element.dart';
 import 'package:build/build.dart';
 import 'package:code_builder/code_builder.dart';
 import 'package:json_annotation/json_annotation.dart';
+// ignore: implementation_imports
 import 'package:json_serializable/src/type_helpers/config_types.dart';
 import 'package:source_gen/source_gen.dart';
 
