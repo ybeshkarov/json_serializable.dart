@@ -519,6 +519,80 @@ external JSArray<JSString> _\$jsObjectKeys(JSObject obj);'''),
         }),
       );
     });
+
+    test(
+      'mutable fields, createToJson: false views, doc comments, and '
+      '@JsonKey(includeIfNull: true) required nullable factory params',
+      () async {
+        final output = await _generateFormatted('''
+import 'package:json_annotation/json_annotation.dart';
+
+/// In-place mutated view model.
+@JsonSerializable(
+  fieldRename: FieldRename.snake,
+  createFactory: false,
+  createToJson: false,
+)
+class MutableView {
+  /// Read-only identifier.
+  final String itemId;
+
+  /// Mutated in place.
+  double lineTotal;
+
+  MutableView({
+    required this.itemId,
+    this.lineTotal = 0,
+  });
+}
+
+@JsonSerializable(createFactory: false)
+class OutputResult {
+  final int totalRows;
+
+  @JsonKey(includeIfNull: true)
+  final String? firstRowId;
+
+  final String? optionalNote;
+
+  const OutputResult({
+    required this.totalRows,
+    required this.firstRowId,
+    this.optionalNote,
+  });
+}
+''');
+
+        expect(output, contains('/// In-place mutated view model.'));
+        expect(output, contains('/// Read-only identifier.'));
+        expect(
+          output,
+          contains('''
+  @JS('item_id')
+  external String get itemId;'''),
+        );
+        expect(output, isNot(contains('set itemId(')));
+        expect(
+          output,
+          contains('''
+  @JS('line_total')
+  external double? get lineTotal;
+  @JS('line_total')
+  external set lineTotal(double? value);'''),
+        );
+        expect(output, isNot(contains('external factory MutableViewJS(')));
+
+        expect(
+          output,
+          contains('''
+  external factory OutputResultJS({
+    required int totalRows,
+    required String? firstRowId,
+    String? optionalNote,
+  });'''),
+        );
+      },
+    );
   });
 
   group('error handling & validation', () {

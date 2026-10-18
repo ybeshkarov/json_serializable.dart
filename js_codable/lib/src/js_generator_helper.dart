@@ -93,7 +93,9 @@ class JsGeneratorHelper extends HelperCore {
       );
     }
 
-    _recordLibraryImport(element.library);
+    if (config.createFactory || config.createToJson) {
+      _recordLibraryImport(element.library);
+    }
 
     final processed = _processFields();
     final decodeFields = processed.decodeFields;
@@ -303,31 +305,33 @@ class JsGeneratorHelper extends HelperCore {
     ];
 
     final constructors = <Constructor>[
-      Constructor(
-        (c) => c
-          ..external = true
-          ..factory = true
-          ..optionalParameters.addAll([
-            for (final field in factoryFields)
-              Parameter((p) {
-                final wireName = nameAccess(field);
-                final wireType = _encodeExternalWireTypeForField(field);
-                final isNullable = wireType.endsWith('?');
-                p
-                  ..name = field.name!
-                  ..named = true
-                  ..required = !isNullable
-                  ..type = refer(wireType);
-                if (wireName != field.name!) {
-                  p.annotations.add(
-                    refer(
-                      'JS',
-                    ).call([CodeExpression(Code(safeNameAccess(field)))]),
-                  );
-                }
-              }),
-          ]),
-      ),
+      if (config.createToJson)
+        Constructor(
+          (c) => c
+            ..external = true
+            ..factory = true
+            ..optionalParameters.addAll([
+              for (final field in factoryFields)
+                Parameter((p) {
+                  final wireName = nameAccess(field);
+                  final wireType = _encodeExternalWireTypeForField(field);
+                  final isNullable = wireType.endsWith('?');
+                  p
+                    ..name = field.name!
+                    ..named = true
+                    ..required =
+                        !isNullable || _hasExplicitIncludeIfNullTrue(field)
+                    ..type = refer(wireType);
+                  if (wireName != field.name!) {
+                    p.annotations.add(
+                      refer(
+                        'JS',
+                      ).call([CodeExpression(Code(safeNameAccess(field)))]),
+                    );
+                  }
+                }),
+            ]),
+        ),
       if (config.createToJson)
         Constructor(
           (c) => c
@@ -346,8 +350,14 @@ class JsGeneratorHelper extends HelperCore {
     ];
 
     final methods = <Method>[
-      for (final field in getterFields) _buildJsGetter(field),
-      for (final field in nonIdentifierEncodeFields) _buildJsSetter(field),
+      for (final field in getterFields) ...[
+        _buildJsGetter(field),
+        if (_isMutableField(field) &&
+            !nonIdentifierEncodeFields.contains(field))
+          _buildJsSetter(field),
+      ],
+      if (config.createToJson)
+        for (final field in nonIdentifierEncodeFields) _buildJsSetter(field),
       if (config.createFactory)
         Method(
           (m) => m
@@ -358,8 +368,11 @@ class JsGeneratorHelper extends HelperCore {
         ),
     ];
 
-    return ExtensionType(
-      (b) => b
+    return ExtensionType((b) {
+      if (element.documentationComment case final doc? when doc.isNotEmpty) {
+        b.docs.add(doc);
+      }
+      b
         ..name = '${className}JS'
         ..constant = true
         ..primaryConstructorName = '_'
@@ -370,26 +383,56 @@ class JsGeneratorHelper extends HelperCore {
         )
         ..implements.add(refer('JSObject'))
         ..constructors.addAll(constructors)
-        ..methods.addAll(methods),
+        ..methods.addAll(methods);
+    });
+  }
+
+  bool _isMutableField(FieldElement field) {
+    if (field.isFinal || field.isConst) return false;
+    final setter = element.lookUpSetter(
+      name: field.name!,
+      library: element.library,
     );
+    return setter != null && setter.isPublic;
+  }
+
+  bool _hasExplicitIncludeIfNullTrue(FieldElement field) {
+    for (final f in fieldHierarchyFor(field)) {
+      final ann = jsonKeyAnnotation(f);
+      if (!ann.isNull) {
+        final reader = ann.read('includeIfNull');
+        if (!reader.isNull) {
+          return reader.boolValue;
+        }
+      }
+    }
+    return false;
   }
 
   Method _buildJsGetter(FieldElement field) {
     final wireName = nameAccess(field);
     final wireType = _decodeExternalWireTypeForField(field);
+    final doc =
+        field.documentationComment ?? field.getter?.documentationComment;
     if (wireName.contains('.')) {
       _dartImports.add('dart:js_interop_unsafe');
-      return Method(
-        (m) => m
+      return Method((m) {
+        if (doc != null && doc.isNotEmpty) {
+          m.docs.add(doc);
+        }
+        m
           ..type = MethodType.getter
           ..name = field.name!
           ..returns = refer(wireType)
           ..lambda = true
-          ..body = _buildDotGetterExpression(field, wireType).code,
-      );
+          ..body = _buildDotGetterExpression(field, wireType).code;
+      });
     }
 
     return Method((m) {
+      if (doc != null && doc.isNotEmpty) {
+        m.docs.add(doc);
+      }
       m
         ..external = true
         ..type = MethodType.getter
@@ -405,7 +448,9 @@ class JsGeneratorHelper extends HelperCore {
 
   Method _buildJsSetter(FieldElement field) {
     final wireName = nameAccess(field);
-    final wireType = _encodeExternalWireTypeForField(field);
+    final wireType = config.createToJson
+        ? _encodeExternalWireTypeForField(field)
+        : _decodeExternalWireTypeForField(field);
     if (wireName.contains('.')) {
       _dartImports.add('dart:js_interop_unsafe');
       return Method(
@@ -424,8 +469,8 @@ class JsGeneratorHelper extends HelperCore {
       );
     }
 
-    return Method(
-      (m) => m
+    return Method((m) {
+      m
         ..external = true
         ..type = MethodType.setter
         ..name = field.name!
@@ -435,11 +480,13 @@ class JsGeneratorHelper extends HelperCore {
               ..name = 'value'
               ..type = refer(wireType),
           ),
-        )
-        ..annotations.add(
+        );
+      if (wireName != field.name!) {
+        m.annotations.add(
           refer('JS').call([CodeExpression(Code(safeNameAccess(field)))]),
-        ),
-    );
+        );
+      }
+    });
   }
 
   Expression _buildDotGetterExpression(FieldElement field, String wireType) {

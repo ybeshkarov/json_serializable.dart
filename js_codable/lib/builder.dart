@@ -24,6 +24,7 @@ Builder jsCodableBuilder(BuilderOptions options) {
     return LibraryBuilder(
       JsCodableGenerator(config: config),
       generatedExtension: '.js_codable.dart',
+      header: '$defaultFileHeader\n// ignore_for_file: type=lint',
       formatOutput: (code, languageVersion) =>
           DartFormatter(languageVersion: languageVersion).format(code),
     );
