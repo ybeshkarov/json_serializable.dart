@@ -63,10 +63,10 @@ PersonJS $PersonToJs(Person instance) =>
 ### Hard JS & Standalone-Library Constraints
 
 - **Public declarations only**: Because `.js_codable.dart` is a separate library
-  (keeping `models.dart` free of `dart:js_interop`), private classes (`_Person`),
-  private constructors (`Person._()`), private fields/getters/setters, and
-  private `@JsonKey(fromJson: _parse)` or `_CustomConverter` symbols cannot be
-  accessed and are rejected at build time.
+  (keeping `models.dart` free of `dart:js_interop`), private classes
+  (`_Person`), private constructors (`Person._()`), private
+  fields/getters/setters, and private `@JsonKey(fromJson: _parse)` or
+  `_CustomConverter` symbols cannot be accessed and are rejected at build time.
 - **No `genericArgumentFactories: true`**: `dart:js_interop` requires type
   parameters on `extension type` external members to be bounded by `JSAny?`
   (boxed `JSString` / `JSNumber`, not Dart `String` / `int`), and `external`
