@@ -110,6 +110,12 @@ class JsGeneratorHelper extends HelperCore {
     if (config.createFactory || config.createToJson) {
       _recordLibraryImport(element.library);
     }
+    for (final ann in element.metadata.annotations) {
+      _collectTypeImports(ann.computeConstantValue()?.type);
+    }
+    for (final conv in config.converters) {
+      _collectTypeImports(conv.type);
+    }
 
     final processed = _processFields();
     final decodeFields = processed.decodeFields;
@@ -744,10 +750,18 @@ class JsGeneratorHelper extends HelperCore {
       return _converterWireToJsExternalBaseType(converter.jsonType);
     }
 
-    if (_coreScalarExternalBaseType(nonNull) case final scalarBase?) {
-      return scalarBase;
+    if (nonNull.isDartCoreString ||
+        coreDateTimeTypeChecker.isExactlyType(nonNull) ||
+        coreUriTypeChecker.isExactlyType(nonNull) ||
+        coreBigIntTypeChecker.isExactlyType(nonNull)) {
+      return 'String';
     }
-
+    if (nonNull.isDartCoreInt || _coreDurationChecker.isExactlyType(nonNull)) {
+      return 'int';
+    }
+    if (nonNull.isDartCoreDouble) return 'double';
+    if (nonNull.isDartCoreNum) return 'num';
+    if (nonNull.isDartCoreBool) return 'bool';
     if (_isJsInteropExtensionType(nonNull)) return typeToCode(nonNull);
 
     if (nonNull.isEnum) {
@@ -773,22 +787,6 @@ class JsGeneratorHelper extends HelperCore {
     }
 
     throw UnsupportedTypeError(targetType, fieldElementName(ctx));
-  }
-
-  String? _coreScalarExternalBaseType(DartType nonNull) {
-    if (nonNull.isDartCoreString ||
-        coreDateTimeTypeChecker.isExactlyType(nonNull) ||
-        coreUriTypeChecker.isExactlyType(nonNull) ||
-        coreBigIntTypeChecker.isExactlyType(nonNull)) {
-      return 'String';
-    }
-    if (nonNull.isDartCoreInt || _coreDurationChecker.isExactlyType(nonNull)) {
-      return 'int';
-    }
-    if (nonNull.isDartCoreDouble) return 'double';
-    if (nonNull.isDartCoreNum) return 'num';
-    if (nonNull.isDartCoreBool) return 'bool';
-    return null;
   }
 
   String _jsBoxedType(DartType targetType, TypeHelperCtx ctx) {
@@ -990,14 +988,12 @@ class JsGeneratorHelper extends HelperCore {
         '\$${nonNullWireType.element!.name!}FromJs',
       ).call([nonNullJsExpr]);
     }
+    final dartified = nonNullJsExpr.property('dartify').call([]);
     if (coreMapTypeChecker.isAssignableFromType(nonNullWireType)) {
       final typeArgs = nonNullWireType.typeArgumentsOf(coreMapTypeChecker)!;
       final kType = typeArgs[0];
       final vType = typeArgs[1];
-      final asMap = nonNullJsExpr
-          .property('dartify')
-          .call([])
-          .asA(refer('Map'));
+      final asMap = dartified.asA(refer('Map'));
       if (_isDynamicOrObject(kType) && _isDynamicOrObject(vType)) {
         return asMap;
       }
@@ -1007,31 +1003,19 @@ class JsGeneratorHelper extends HelperCore {
       ]);
     }
     if (coreIterableTypeChecker.isAssignableFromType(nonNullWireType)) {
-      return _bridgeJsArrayToConverterIterable(nonNullJsExpr, nonNullWireType);
+      final itemType = coreIterableGenericType(nonNullWireType);
+      final asList = dartified.asA(refer('List'));
+      final casted = _isDynamicOrObject(itemType)
+          ? asList
+          : asList.property('cast').call([], {}, [refer(typeToCode(itemType))]);
+      return _coreSetChecker.isAssignableFromType(nonNullWireType)
+          ? casted.property('toSet').call([])
+          : casted;
     }
-    if (nonNullWireType.isDartCoreObject && !nonNullWireType.isNullableType) {
-      return nonNullJsExpr.property('dartify').call([]).nullChecked;
+    if (nonNullWireType.isDartCoreObject) {
+      return dartified.nullChecked;
     }
-    return nonNullJsExpr.property('dartify').call([]);
-  }
-
-  Expression _bridgeJsArrayToConverterIterable(
-    Expression nonNullJsExpr,
-    DartType nonNullWireType,
-  ) {
-    final itemType = coreIterableGenericType(nonNullWireType);
-    final isSet = _coreSetChecker.isAssignableFromType(nonNullWireType);
-    final asList = nonNullJsExpr
-        .property('dartify')
-        .call([])
-        .asA(refer('List'));
-    if (_isDynamicOrObject(itemType)) {
-      return isSet ? asList.property('toSet').call([]) : asList;
-    }
-    final casted = asList.property('cast').call([], {}, [
-      refer(typeToCode(itemType)),
-    ]);
-    return casted.property(isSet ? 'toSet' : 'toList').call([]);
+    return dartified;
   }
 
   Expression _deserializeExternalValue({
@@ -1875,39 +1859,24 @@ class JsGeneratorHelper extends HelperCore {
 
   void _collectFieldImports(FieldElement field) {
     final decodeType = _decodeTargetTypeForField(field);
-    _collectTypeImports(decodeType);
-    if (field.type != decodeType) {
-      _collectTypeImports(field.type);
+    for (final type in {decodeType, field.type}) {
+      _collectTypeImports(type);
+      final ctx = getHelperContext(field);
+      if (typeConverter(type, ctx) case final converter?) {
+        _collectTypeImports(converter.jsonType);
+        _collectTypeImports(converter.fieldType);
+      }
     }
 
     final ctx = getHelperContext(field);
-    if (ctx.deserializeConvertData case final fromJson?) {
-      _collectTypeImports(fromJson.paramType);
-      _collectTypeImports(fromJson.returnType);
-    }
-    if (ctx.serializeConvertData case final toJson?) {
-      _collectTypeImports(toJson.paramType);
-      _collectTypeImports(toJson.returnType);
-    }
-    if (typeConverter(decodeType, ctx) case final converter?) {
-      _collectTypeImports(converter.jsonType);
-      _collectTypeImports(converter.fieldType);
-    }
-    if (typeConverter(field.type, ctx) case final converter?) {
-      _collectTypeImports(converter.jsonType);
-      _collectTypeImports(converter.fieldType);
+    for (final convertData in [
+      ?ctx.deserializeConvertData,
+      ?ctx.serializeConvertData,
+    ]) {
+      _collectTypeImports(convertData.paramType);
+      _collectTypeImports(convertData.returnType);
     }
 
-    _collectFieldHierarchyImports(field);
-    for (final ann in element.metadata.annotations) {
-      _collectTypeImports(ann.computeConstantValue()?.type);
-    }
-    for (final conv in config.converters) {
-      _collectTypeImports(conv.type);
-    }
-  }
-
-  void _collectFieldHierarchyImports(FieldElement field) {
     for (final f in fieldHierarchyFor(field)) {
       for (final ann in [
         ...f.metadata.annotations,
@@ -1917,14 +1886,12 @@ class JsGeneratorHelper extends HelperCore {
       }
       final keyAnn = jsonKeyAnnotation(f);
       if (!keyAnn.isNull) {
-        final fromFn = keyAnn.read('fromJson');
-        if (!fromFn.isNull) {
-          _recordLibraryImport(fromFn.objectValue.toFunctionValue()?.library);
-        }
-        final toFn = keyAnn.read('toJson');
-        if (!toFn.isNull) {
-          _recordLibraryImport(toFn.objectValue.toFunctionValue()?.library);
-        }
+        _recordLibraryImport(
+          keyAnn.peek('fromJson')?.objectValue.toFunctionValue()?.library,
+        );
+        _recordLibraryImport(
+          keyAnn.peek('toJson')?.objectValue.toFunctionValue()?.library,
+        );
       }
     }
   }
