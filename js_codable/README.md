@@ -104,3 +104,19 @@ PersonJS $PersonToJs(Person instance) =>
     `@JsonSerializable(checked: true)` are not yet wired up; these could be
     implemented using `Object.keys(js)`, `js.hasProperty(...)` from
     `dart:js_interop_unsafe`, and per-field `try`/`catch` wrappers.
+- **Custom JS class bindings via a pure-Dart `@JsCodable(...)` annotation**:
+  Currently, `js_codable` always emits a named-parameter `external factory` with
+  no class-level `@JS(...)` binding, producing and consuming plain `{...}` JS
+  object literals (`Object.prototype`). Because `models.dart` cannot import
+  `@JS(...)` from `dart:js_interop` without breaking Dart VM compatibility, a
+  pure-Dart annotation (in a lightweight annotation package or
+  `package:json_annotation`) could configure:
+  - `jsName` + constructor strategy (e.g., positional `new Person(...)`,
+    zero-arg `new Person()` with setter cascades, or options-object
+    `new Person({...})`), which also unlocks `js.isA<PersonJS>()` (`instanceof`)
+    checks in `dart:js_interop`.
+  - `typeName` to override the generated Dart extension type identifier
+    (`PersonJS`).
+  - `existingJsType` to generate `$PersonFromJs` / `$PersonToJs` against an
+    existing hand-written or `js_interop_gen`-generated extension type instead
+    of emitting a duplicate `PersonJS`.
