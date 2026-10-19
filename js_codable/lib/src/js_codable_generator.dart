@@ -99,7 +99,9 @@ class JsCodableGenerator extends GeneratorForAnnotation<JsonSerializable> {
     final result = helper.generateClass();
     final emitter = DartEmitter(useNullSafetySyntax: true);
     return [
-      ...result.specs.map((s) => s.accept(emitter).toString()),
+      ...result.specs.map(
+        (s) => Library((b) => b..body.add(s)).accept(emitter).toString(),
+      ),
       ...result.addedMembers,
     ];
   }

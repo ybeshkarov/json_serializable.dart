@@ -93,6 +93,15 @@ class JsGeneratorHelper extends HelperCore {
       );
     }
 
+    if (config.genericArgumentFactories) {
+      throw InvalidGenerationSourceError(
+        '`genericArgumentFactories: true` is not supported by `js_codable` '
+        'because `dart:js_interop` extension types cannot declare unbounded '
+        'generic external members or runtime factory callbacks.',
+        element: element,
+      );
+    }
+
     if (config.createFactory || config.createToJson) {
       _recordLibraryImport(element.library);
     }
@@ -777,8 +786,10 @@ class JsGeneratorHelper extends HelperCore {
 
   String _jsBoxedType(DartType targetType, TypeHelperCtx ctx) {
     final base = _jsBoxedBaseType(targetType, ctx);
+    final converter = typeConverter(targetType, ctx);
     final isNullable =
         targetType.isNullableType ||
+        (converter != null && converter.jsonType.isNullableType) ||
         enumFieldWithNullInEncodeMap(targetType) == true;
     return _withNullability(base, isNullable);
   }
@@ -948,10 +959,22 @@ class JsGeneratorHelper extends HelperCore {
 
     if (wireType.isNullableType &&
         defaultValue == null &&
-        (!targetType.isNullableType || returnType.isNullableType) &&
-        (_isPrimitiveJsExternalType(wireType.promoteNonNullable()) ||
-            _isJsInteropExtensionType(wireType.promoteNonNullable()))) {
-      return refer(functionName).call([jsProp]);
+        (!targetType.isNullableType || returnType.isNullableType)) {
+      final nonNullWire = wireType.promoteNonNullable();
+      if (_isPrimitiveJsExternalType(nonNullWire) ||
+          _isJsInteropExtensionType(nonNullWire)) {
+        return refer(functionName).call([jsProp]);
+      }
+      if (_isDynamicOrObject(nonNullWire)) {
+        return refer(
+          functionName,
+        ).call([jsProp.nullSafeProperty('dartify').call([])]);
+      }
+      return _nullSwitchExpression(
+        jsProp,
+        onNonNull: invokeOnNonNull,
+        defaultValue: toCodeString(refer(functionName).call([literalNull])),
+      );
     }
 
     return _nullSwitchExpression(
@@ -1290,12 +1313,35 @@ class JsGeneratorHelper extends HelperCore {
 
     if (typeConverter(targetType, ctx) case final converter?) {
       _validatePublicConverterAccess(ctx.fieldElement, converter.accessString);
+      final wireType = converter.jsonType;
+      final nonNullWire = wireType.promoteNonNullable();
       Expression convertBoxedNonNull(Expression nonNullBoxed) {
-        final wireExpr = _unboxJsAnyToConverterWire(
-          nonNullBoxed,
-          converter.jsonType.promoteNonNullable(),
-        );
+        final wireExpr = _unboxJsAnyToConverterWire(nonNullBoxed, nonNullWire);
         return refer('${converter.accessString}.fromJson').call([wireExpr]);
+      }
+
+      if (wireType.isNullableType &&
+          (!isNullable || converter.fieldType.isNullableType)) {
+        if (_isJsInteropExtensionType(nonNullWire)) {
+          return refer('${converter.accessString}.fromJson').call([boxedExpr]);
+        }
+        if (_boxedPrimitiveGetterName(nonNullWire) case final getterName?) {
+          return refer(
+            '${converter.accessString}.fromJson',
+          ).call([boxedExpr.nullSafeProperty(getterName)]);
+        }
+        if (_isDynamicOrObject(nonNullWire)) {
+          return refer(
+            '${converter.accessString}.fromJson',
+          ).call([boxedExpr.nullSafeProperty('dartify').call([])]);
+        }
+        return _nullSwitchExpression(
+          boxedExpr,
+          onNonNull: convertBoxedNonNull,
+          defaultValue: toCodeString(
+            refer('${converter.accessString}.fromJson').call([literalNull]),
+          ),
+        );
       }
 
       if (isNullable) {
@@ -1372,7 +1418,7 @@ class JsGeneratorHelper extends HelperCore {
         _ => nonNullBoxed.property('dartify').call([]),
       };
       return _deserializeEnum(
-        targetType: nonNull,
+        targetType: targetType,
         wireExpr: unboxed,
         ctx: ctx,
         defaultValue: null,
@@ -1498,7 +1544,10 @@ class JsGeneratorHelper extends HelperCore {
     if (!isNullable && nonNull.isDartCoreObject) {
       return wireExpr.property('jsify').call([]).nullChecked;
     }
-    return wireExpr.property('jsify').call([]);
+    final receiver = wireType is DynamicType
+        ? wireExpr.asA(refer('Object?'))
+        : wireExpr;
+    return receiver.property('jsify').call([]);
   }
 
   Expression _serializeToExternalJs({
@@ -1515,7 +1564,10 @@ class JsGeneratorHelper extends HelperCore {
     }
 
     if (_isDynamicOrObject(nonNull)) {
-      final jsified = dartExpr.property('jsify').call([]);
+      final receiver = targetType is DynamicType
+          ? dartExpr.asA(refer('Object?'))
+          : dartExpr;
+      final jsified = receiver.property('jsify').call([]);
       return targetType.isDartCoreObject && !isNullable
           ? jsified.nullChecked
           : jsified;
@@ -1754,7 +1806,10 @@ class JsGeneratorHelper extends HelperCore {
       return dartExpr;
     }
     if (_isDynamicOrObject(nonNull)) {
-      return dartExpr.property('jsify').call([]);
+      final receiver = targetType is DynamicType
+          ? dartExpr.asA(refer('Object?'))
+          : dartExpr;
+      return receiver.property('jsify').call([]);
     }
 
     if (_serializeCoreValueToPrimitive(

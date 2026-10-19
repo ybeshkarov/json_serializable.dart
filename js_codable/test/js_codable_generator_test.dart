@@ -695,6 +695,33 @@ class BadFieldClass {
         ),
       );
     });
+
+    test(
+      'rejects genericArgumentFactories: true with explicit message',
+      () async {
+        await expectLater(
+          _generateFormatted('''
+import 'package:json_annotation/json_annotation.dart';
+
+@JsonSerializable(genericArgumentFactories: true)
+class GenericBox<T> {
+  final T value;
+  GenericBox(this.value);
+}
+'''),
+          throwsA(
+            isA<InvalidGenerationSourceError>().having(
+              (e) => e.message,
+              'message',
+              contains(
+                '`genericArgumentFactories: true` is not supported by '
+                '`js_codable`',
+              ),
+            ),
+          ),
+        );
+      },
+    );
   });
 
   group('test/fixtures/models.dart pure-Dart VM & codegen sync', () {
